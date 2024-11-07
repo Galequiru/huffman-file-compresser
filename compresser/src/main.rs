@@ -1,72 +1,84 @@
 use counter::Counter;
-use std::{cmp::Reverse, collections::{BinaryHeap, HashMap}, fs};
+use std::{cmp::Reverse, collections::{BinaryHeap, HashMap}, fs::File, io::{Error, ErrorKind, Read}, path::Path};
 
-#[derive(Debug)]
+const COMPRESSED_FILE_EXTENTION: &str = "foo";
+
+#[derive(Debug, PartialEq, Eq)]
 enum NodeType {
     Leaf {
         symbol: u8
     },
     Branch {
-        left: Box<Node>,
-        rigth: Box<Node>
+        left: Box<TreeNode>,
+        rigth: Box<TreeNode>
     }
 }
 
-#[derive(Debug)]
-struct Node {
+#[derive(Debug, PartialEq, Eq)]
+struct TreeNode {
     frequency: usize,
-    kind: NodeType
+    node_type: NodeType
 }
 
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        self.frequency == other.frequency
-    }
-}
-
-impl Eq for Node {}
-
-impl PartialOrd for Node {
+impl PartialOrd for TreeNode {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.frequency.partial_cmp(&other.frequency)
     }
 }
 
-impl Ord for Node {
+impl Ord for TreeNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         return self.frequency.cmp(&other.frequency);
     }
 }
 
-fn main() -> Result<(), &'static str> {
+fn main() -> Result<(), Error> {
     let args = std::env::args();
 
     if args.len() != 2 {
-        return Err("Wrong usage: expected file path argument");
+        return Err(Error::new(ErrorKind::InvalidInput, 
+            "Wrong usage\nExpected usage: compresser filePath"));
+    }
+    let arg = args.last().unwrap();
+    let path = Path::new(&arg);
+
+    let mut file = File::open(path)?;
+
+    let mut data = String::new();
+    file.read_to_string(&mut data)?;
+
+    if let Some(extension) = path.extension() {
+        match extension.to_str() {
+            Some(COMPRESSED_FILE_EXTENTION) => {
+                decompress_file();
+            },
+            _ => {
+                compress_file(path, &data);
+            }
+        }
     }
 
-    let file = args.last().unwrap();
-
-    if let Ok(data) = fs::read_to_string(file) {
-        let frequencies = data
-            .bytes()
-            .collect::<Counter<_>>()
-            .into_map();
-
-        let root = build_huffman_tree(&frequencies);
-        println!("{:#?}", root);
-        let codes = generate_codes_from_huffman_tree(&root);
-        println!("{:#?}", codes);
-
-        return Ok(())
-    }
-
-    Err("Error reading file")
+    Ok(())
 }
 
-fn generate_codes_from_huffman_tree(root: &Node) -> HashMap<u8, String> {
-    fn build_code(current_code: String, node: &Node, codes: &mut HashMap<u8, String>) {
-        match &node.kind {
+fn compress_file(path: &Path, data: &str) {
+    let frequencies = data
+        .bytes()
+        .collect::<Counter<_>>()
+        .into_map();
+
+    let root = build_huffman_tree(&frequencies).unwrap();
+
+    let codes = generate_codes_from_huffman_tree(&root);
+}
+
+fn decompress_file() {
+
+}
+
+fn generate_codes_from_huffman_tree(root: &TreeNode) -> HashMap<u8, String> {
+    fn build_code(current_code: String, node: &TreeNode, codes: &mut HashMap<u8, String>) {
+        match &node.node_type {
             NodeType::Leaf { symbol } => {
                 codes.insert(*symbol, current_code);
             }
@@ -81,12 +93,12 @@ fn generate_codes_from_huffman_tree(root: &Node) -> HashMap<u8, String> {
     codes
 }
 
-fn build_huffman_tree(frequencies: &HashMap<u8, usize>) -> Node {
+fn build_huffman_tree(frequencies: &HashMap<u8, usize>) -> Option<TreeNode> {
     let mut queue = frequencies
         .iter()
-        .map(|(symbol, frequency)| Reverse(Node{
+        .map(|(symbol, frequency)| Reverse(TreeNode{
             frequency: frequency.to_owned(),
-            kind: NodeType::Leaf { 
+            node_type: NodeType::Leaf { 
                 symbol: symbol.to_owned() 
             }
         }))
@@ -96,14 +108,14 @@ fn build_huffman_tree(frequencies: &HashMap<u8, usize>) -> Node {
         let rigth = queue.pop().unwrap().0;
         let left = queue.pop().unwrap().0;
 
-        queue.push(Reverse(Node { 
+        queue.push(Reverse(TreeNode { 
             frequency: left.frequency + rigth.frequency, 
-            kind: NodeType::Branch { 
+            node_type: NodeType::Branch { 
                 left: Box::new(left), 
                 rigth: Box::new(rigth) 
             }
         }));
     }
 
-    queue.pop().unwrap().0
+    Some(queue.pop()?.0)
 }
