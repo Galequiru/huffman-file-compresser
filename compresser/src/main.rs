@@ -33,11 +33,10 @@ impl Ord for TreeNode {
 }
 
 fn main() -> Result<(), Error> {
-    let args = std::env::args();
+    let mut args = std::env::args();
 
     if args.len() != 2 {
-        return Err(Error::new(ErrorKind::InvalidInput, 
-            "Wrong usage\nExpected usage: compresser filePath"));
+        return Err(Error::new(ErrorKind::InvalidInput, format!("Usage: {} <file>", args.next().unwrap())))
     }
     let arg = args.last().unwrap();
     let path = Path::new(&arg);
@@ -50,30 +49,47 @@ fn main() -> Result<(), Error> {
     if let Some(extension) = path.extension() {
         match extension.to_str() {
             Some(COMPRESSED_FILE_EXTENTION) => {
-                decompress_file();
+                return decompress_file()
             },
             _ => {
-                compress_file(path, &data);
+                return compress_file(path, &data)
             }
         }
     }
-
-    Ok(())
+    return Err(Error::new(ErrorKind::InvalidInput, 
+        "invalid file"));
 }
 
-fn compress_file(path: &Path, data: &str) {
+fn compress_file(path: &Path, data: &str) -> Result<(), Error> {
     let frequencies = data
         .bytes()
         .collect::<Counter<_>>()
         .into_map();
 
-    let root = build_huffman_tree(&frequencies).unwrap();
+    if frequencies.len() == 0 {
+        return Err(Error::new(ErrorKind::InvalidData, 
+            "The file was empty"));
+    }
+
+    let root = build_huffman_tree(&frequencies).ok_or(
+        Error::new(ErrorKind::InvalidData, "The file was empty")
+    )?;
 
     let codes = generate_codes_from_huffman_tree(&root);
+    println!("{:#?}", codes);
+
+    let compressed_text = data
+        .bytes()
+        .map(|symbol| codes.get(&symbol).unwrap())
+        .collect::<Vec<_>>();
+
+    println!("{:?}", compressed_text);
+
+    Ok(())
 }
 
-fn decompress_file() {
-
+fn decompress_file() -> Result<(), Error>{
+    Err(Error::last_os_error())
 }
 
 fn generate_codes_from_huffman_tree(root: &TreeNode) -> HashMap<u8, String> {
@@ -97,9 +113,9 @@ fn build_huffman_tree(frequencies: &HashMap<u8, usize>) -> Option<TreeNode> {
     let mut queue = frequencies
         .iter()
         .map(|(symbol, frequency)| Reverse(TreeNode{
-            frequency: frequency.to_owned(),
+            frequency: *frequency,
             node_type: NodeType::Leaf { 
-                symbol: symbol.to_owned() 
+                symbol: *symbol
             }
         }))
         .collect::<BinaryHeap<_>>();
@@ -108,7 +124,7 @@ fn build_huffman_tree(frequencies: &HashMap<u8, usize>) -> Option<TreeNode> {
         let rigth = queue.pop().unwrap().0;
         let left = queue.pop().unwrap().0;
 
-        queue.push(Reverse(TreeNode { 
+        queue.push(Reverse(TreeNode {
             frequency: left.frequency + rigth.frequency, 
             node_type: NodeType::Branch { 
                 left: Box::new(left), 
